@@ -84,3 +84,4 @@ cat > /usr/local/etc/xray/config.json <<-END
 }
 END
 service xray restart
+rm ok
