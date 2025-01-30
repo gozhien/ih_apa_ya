@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# File HTML input
+html_file="/sdcard/download/Reqable/_search.html"
+
+# Ekstrak IP dan port dari URL dalam tag <a href="https://search.censys.io/hosts/">
+grep -oP 'https://search\.censys\.io/hosts/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*?#([0-9]+)-TCP-HTTP' "$html_file" | \
+sed -E 's|https://search\.censys\.io/hosts/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*?#([0-9]+)-TCP-HTTP|\1:\2|' > ip_port_list.txt
+
+# Inisialisasi file hasil
+> hasil
+
+# Warna untuk output
+GREEN="\033[0;32m"
+RED="\033[0;31m"
+NC="\033[0m" # No Color
+
+# Fungsi untuk mengecek proxy
+check_proxy() {
+    local line=$1
+    ip=$(echo "$line" | cut -d':' -f1)   # Ambil IP
+    port=$(echo "$line" | cut -d':' -f2) # Ambil Port
+
+    # Uji proxy menggunakan curl dengan timeout 3 detik
+    response=$(curl -s --max-time 10 --proxy "$ip:$port" http://ipinfo.io)
+
+    # Cek apakah response valid (berisi informasi IP)
+    if echo "$response" | grep -q '"ip"'; then
+        country=$(echo "$response" | grep -o '"country": "[^"]*' | awk -F': "' '{print $2}')
+        org=$(echo "$response" | grep -o '"org": "[^"]*' | awk -F': "' '{print $2}')
+
+        if [[ -n "$country" && -n "$org" ]]; then
+            # Hapus bagian 'ASxxxxx' dari org jika ada
+            org=$(echo "$org" | sed 's/AS[0-9]* //g')
+
+            # Ganti spasi dengan %20 dan simbol '|' dengan %7C
+            org_escaped=$(echo "$org" | sed 's/ /%20/g; s/|/%7C/g')
+
+            # Simpan hasil proxy hidup
+            echo -e "${GREEN}${ip}:${port}${NC}"
+            echo "http://$ip:$port/#$country%7C$org_escaped" >> hasil
+        fi
+    else
+        # Tampilkan proxy mati
+        echo -e "${RED}${ip}:${port}${NC}"
+    fi
+}
+
+# Batasi jumlah proses paralel
+MAX_PARALLEL=10
+active_jobs=0
+
+while IFS= read -r line; do
+    # Jalankan pengecekan di background
+    check_proxy "$line" &
+    ((active_jobs++))
+
+    # Jika jumlah proses aktif mencapai batas, tunggu
+    if [[ $active_jobs -ge $MAX_PARALLEL ]]; then
+        wait -n  # Tunggu salah satu proses selesai
+        ((active_jobs--))
+    fi
+done < ip_port_list.txt
+
+# Tunggu semua proses selesai
+wait
+
+# Hapus file sementara 'ip_port_list.txt'
+rm -f ip_port_list.txt
+echo "hasil"
+cat hasil

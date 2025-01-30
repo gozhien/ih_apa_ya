@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# Warna ANSI untuk output
+RED='\033[0;31m'   # Merah (Proxy Mati)
+GREEN='\033[0;32m' # Hijau (Proxy Hidup)
+NC='\033[0m'       # Reset warna
+
+# File HTML input
+html_file="/sdcard/download/Reqable/result.html"
+
+# Pastikan file HTML ada
+if [[ ! -f "$html_file" ]]; then
+    echo -e "${RED}File tidak ditemukan: $html_file${NC}"
+    exit 1
+fi
+
+# Ekstrak IP dan port dari tag <a href="http://IP:port">
+grep -oP '(?<=<a href="http://)[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?' "$html_file" > ip_port_list.txt
+
+# Cek apakah ada hasil ekstraksi
+if [[ ! -s ip_port_list.txt ]]; then
+    rm -f ip_port_list.txt
+    exit 1
+fi
+
+# Inisialisasi file hasil
+> hasil
+
+# Cek proxy dengan curl
+while IFS= read -r line; do
+    ip=$(echo "$line" | cut -d':' -f1)
+    port=$(echo "$line" | cut -d':' -f2)
+    [[ -z "$port" ]] && port=80  # Gunakan port default 80 jika tidak ada
+
+    response=$(curl -s --max-time 3 --proxy "$ip:$port" http://ipinfo.io)
+
+    if echo "$response" | grep -q '"ip"'; then
+        country=$(echo "$response" | grep -o '"country": "[^"]*' | awk -F': "' '{print $2}')
+        org=$(echo "$response" | grep -o '"org": "[^"]*' | awk -F': "' '{print $2}')
+        [[ -n "$country" && -n "$org" ]] || continue
+        
+        org=$(echo "$org" | sed 's/AS[0-9]* //g' | sed 's/ /%20/g; s/|/%7C/g')
+        
+        echo -e "${GREEN}$ip:$port${NC}"
+        echo "http://$ip:$port/#$country%7C$org" >> hasil
+    else
+        echo -e "${RED}$ip:$port${NC}"
+    fi
+done < ip_port_list.txt
+
+rm -f ip_port_list.txt
+cat hasil

@@ -1,0 +1,60 @@
+#!/bin/bash
+
+# File HTML input
+html_file="/sdcard/download/Reqable/_search.html"
+
+# Ekstrak IP dan port dari URL dalam tag <a href="https://search.censys.io/hosts/">
+grep -oP 'https://search\.censys\.io/hosts/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*?#([0-9]+)-TCP-HTTP' "$html_file" | \
+sed -E 's|https://search\.censys\.io/hosts/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*?#([0-9]+)-TCP-HTTP|\1:\2|' > ip_port_list.txt
+
+# Inisialisasi file hasil
+> hasil
+
+# Warna untuk output
+GREEN="\033[0;32m"
+RED="\033[0;31m"
+NC="\033[0m" # No Color
+
+# Fungsi untuk mengecek proxy menggunakan API proxyip.edtunnel.best
+check_proxy() {
+    local line=$1
+    ip=$(echo "$line" | cut -d':' -f1)   # Ambil IP
+    port=$(echo "$line" | cut -d':' -f2) # Ambil Port
+
+    # Query ke API proxy checker dan hapus null byte
+    response=$(curl -s -X GET "https://proxyip.edtunnel.best/api?ip=${ip}&host=speed.cloudflare.com&port=${port}&tls=true" \
+        -H 'User-Agent: Mozilla/5.0 (Linux; Android 7.1.2; Redmi 4A Build/N2G47H) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.6045.193 Mobile Safari/537.36' \
+        -H 'Accept-Encoding: gzip, deflate' \
+        -H 'sec-ch-ua: "Android WebView";v="119", "Chromium";v="119", "Not?A_Brand";v="24"' \
+        -H 'sec-ch-ua-mobile: ?1' \
+        -H 'sec-ch-ua-platform: "Android"' \
+        -H 'x-requested-with: mark.via.gp' \
+        -H 'sec-fetch-site: same-origin' \
+        -H 'sec-fetch-mode: cors' \
+        -H 'sec-fetch-dest: empty' \
+        -H 'referer: https://proxyip.edtunnel.best/?ip=cdn.xn--b6gac.eu.org:443' \
+        -H 'accept-language: id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7' --compressed | tr -d '\0') # Hapus Null Byte
+
+    # Debug: Tampilkan response untuk memastikan konten yang diterima
+    #echo "Response untuk $ip:$port: $response" # Jika perlu debugging, hapus komentar di sini
+
+    # Periksa apakah proxy hidup dengan 'proxyip': true
+    if [[ "$response" =~ '"proxyip":true' ]]; then
+        # Simpan IP dan port dari proxy yang hidup ke file hasil
+        echo "${ip}:${port}" >> hasil
+        echo -e "${GREEN}${ip}:${port}${NC}    =>>> LIVE"
+    else
+        # Tampilkan proxy mati
+        echo -e "${RED}${ip}:${port}${NC}    =>>> DEAD"
+    fi
+}
+
+# Lakukan pengecekan satu per satu untuk setiap IP
+while IFS= read -r line; do
+    check_proxy "$line" # Pengecekan berurutan
+done < ip_port_list.txt
+
+# Hapus file sementara 'ip_port_list.txt'
+rm -f ip_port_list.txt
+echo "Hasil pengecekan:"
+cat hasil
